@@ -28,6 +28,26 @@ final class EditorDocument: ObservableObject {
             }
         }
     }
+    
+    func saveFileAs() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = fileURL?.lastPathComponent ?? "Untitled.txt"
+        panel.canCreateDirectories = true
+
+        if panel.runModal() == .OK, let url = panel.url {
+            writeToFile(url: url)
+            self.fileURL = url
+        }
+    }
+
+    private func writeToFile(url: URL) {
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            showError("Не удалось сохранить файл: \(error.localizedDescription)")
+        }
+    }
 
     private func showError(_ message: String) {
         let alert = NSAlert()
@@ -59,6 +79,12 @@ struct EditorTXTApp: App {
                     document.openFile()
                 }
                 .keyboardShortcut("o", modifiers: .command)
+            }
+            CommandGroup(after: .saveItem) {
+                Button("Save As...") {
+                    document.saveFileAs()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
             }
         }
     }
