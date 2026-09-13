@@ -40,6 +40,14 @@ final class EditorDocument: ObservableObject {
             self.fileURL = url
         }
     }
+    
+    func saveFile() {
+        if let url = fileURL {
+            writeToFile(url: url)
+        } else {
+            saveFileAs()
+        }
+    }
 
     private func writeToFile(url: URL) {
         do {
@@ -81,6 +89,10 @@ struct EditorTXTApp: App {
                 .keyboardShortcut("o", modifiers: .command)
             }
             CommandGroup(after: .saveItem) {
+                Button("Save") {
+                    document.saveFile()
+                }
+                .keyboardShortcut("s", modifiers: .command)
                 Button("Save As...") {
                     document.saveFileAs()
                 }
