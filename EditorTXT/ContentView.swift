@@ -1,12 +1,11 @@
 import SwiftUI
 
 struct ContentView: View {
-    // Хранит текущий текст, отображаемый в редакторе
-    @State private var text: String = ""
+    @EnvironmentObject private var document: EditorDocument
 
     var body: some View {
         VStack(spacing: 0) {
-            TextEditor(text: $text)
+            TextEditor(text: $document.text)
                 .font(.system(size: 14, design: .monospaced))
                 .padding(8)
         }
@@ -16,4 +15,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .environmentObject(EditorDocument())
 }
