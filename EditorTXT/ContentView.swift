@@ -1,14 +1,16 @@
 import SwiftUI
 
 struct ContentView: View {
+    // Хранит текущий текст, отображаемый в редакторе
+    @State private var text: String = ""
+
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        VStack(spacing: 0) {
+            TextEditor(text: $text)
+                .font(.system(size: 14, design: .monospaced))
+                .padding(8)
         }
-        .padding()
+        .frame(minWidth: 500, minHeight: 400)
     }
 }
 
