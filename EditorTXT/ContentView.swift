@@ -3,12 +3,27 @@ import Combine
 import UniformTypeIdentifiers
 
 final class EditorDocument: ObservableObject {
-    @Published var text: String = ""
+    @Published var text: String = "" {
+        didSet {
+            guard !isLoading else { return }
+            isEdited = true
+        }
+    }
     @Published var fileURL: URL?
+    @Published var isEdited: Bool = false
+
+    private var isLoading = false
+
+    var displayName: String {
+        fileURL?.lastPathComponent ?? "Untitled"
+    }
 
     func newDocument() {
+        isLoading = true
         text = ""
         fileURL = nil
+        isEdited = false
+        isLoading = false
     }
 
     func openFile() {
@@ -21,8 +36,11 @@ final class EditorDocument: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url {
             do {
                 let content = try String(contentsOf: url, encoding: .utf8)
+                isLoading = true
                 self.text = content
                 self.fileURL = url
+                self.isEdited = false
+                isLoading = false
             } catch {
                 showError("Не удалось открыть файл: \(error.localizedDescription)")
             }
@@ -52,6 +70,7 @@ final class EditorDocument: ObservableObject {
     private func writeToFile(url: URL) {
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
+            isEdited = false
         } catch {
             showError("Не удалось сохранить файл: \(error.localizedDescription)")
         }
