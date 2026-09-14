@@ -85,6 +85,30 @@ final class EditorDocument: ObservableObject {
     }
 }
 
+private struct WindowConfigurator: NSViewRepresentable {
+    let title: String
+    let isEdited: Bool
+    let representedURL: URL?
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            configure(view)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        configure(nsView)
+    }
+
+    private func configure(_ view: NSView) {
+        guard let window = view.window else { return }
+        window.title = title
+        window.isDocumentEdited = isEdited
+        window.representedURL = representedURL
+    }
+}
 
 struct ContentView: View {
     @EnvironmentObject private var document: EditorDocument
@@ -96,6 +120,13 @@ struct ContentView: View {
                 .padding(8)
         }
         .frame(minWidth: 500, minHeight: 400)
+        .background(
+            WindowConfigurator(
+                title: document.displayName,
+                isEdited: document.isEdited,
+                representedURL: document.fileURL
+            )
+        )
     }
 }
 
