@@ -18,6 +18,18 @@ final class EditorDocument: ObservableObject {
         fileURL?.lastPathComponent ?? "Untitled"
     }
 
+    var characterCount: Int {
+        text.count
+    }
+
+    var wordCount: Int {
+        text.split { $0.isWhitespace || $0.isNewline }.count
+    }
+
+    var lineCount: Int {
+        text.isEmpty ? 1 : text.components(separatedBy: .newlines).count
+    }
+
     func newDocument() {
         isLoading = true
         text = ""
