@@ -38,6 +38,7 @@ struct EditorTXTApp: App {
             ContentView()
                 .environmentObject(document)
                 .frame(minWidth: 500, minHeight: 400)
+                .preferredColorScheme(currentTheme.colorScheme)
         }
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -62,6 +63,20 @@ struct EditorTXTApp: App {
                     document.saveFileAs()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+            }
+
+            CommandMenu("View") {
+                ForEach(AppTheme.allCases) { theme in
+                    Button {
+                        themeRawValue = theme.rawValue
+                    } label: {
+                        if theme == currentTheme {
+                            Label(theme.title, systemImage: "checkmark")
+                        } else {
+                            Text(theme.title)
+                        }
+                    }
+                }
             }
         }
     }
