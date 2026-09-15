@@ -122,6 +122,28 @@ private struct WindowConfigurator: NSViewRepresentable {
     }
 }
 
+private struct StatusBarView: View {
+    let characterCount: Int
+    let wordCount: Int
+    let lineCount: Int
+
+    var body: some View {
+        HStack {
+            Text("Строк: \(lineCount)")
+            Divider().frame(height: 12)
+            Text("Слов: \(wordCount)")
+            Divider().frame(height: 12)
+            Text("Символов: \(characterCount)")
+            Spacer()
+        }
+        .font(.system(size: 11))
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var document: EditorDocument
 
@@ -130,6 +152,14 @@ struct ContentView: View {
             TextEditor(text: $document.text)
                 .font(.system(size: 14, design: .monospaced))
                 .padding(8)
+
+            Divider()
+
+            StatusBarView(
+                characterCount: document.characterCount,
+                wordCount: document.wordCount,
+                lineCount: document.lineCount
+            )
         }
         .frame(minWidth: 500, minHeight: 400)
         .background(
