@@ -31,6 +31,7 @@ final class EditorDocument: ObservableObject {
     }
 
     func newDocument() {
+        guard confirmDiscardChanges() else { return }
         isLoading = true
         text = ""
         fileURL = nil
@@ -39,6 +40,8 @@ final class EditorDocument: ObservableObject {
     }
 
     func openFile() {
+        guard confirmDiscardChanges() else { return }
+
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.plainText, .text]
         panel.allowsMultipleSelection = false
@@ -76,6 +79,27 @@ final class EditorDocument: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url {
             writeToFile(url: url)
             self.fileURL = url
+        }
+    }
+
+    func confirmDiscardChanges() -> Bool {
+        guard isEdited else { return true }
+
+        let alert = NSAlert()
+        alert.messageText = "Сохранить изменения?"
+        alert.informativeText = "В документе есть несохранённые изменения."
+        alert.addButton(withTitle: "Сохранить")
+        alert.addButton(withTitle: "Не сохранять")
+        alert.addButton(withTitle: "Отмена")
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            saveFile()
+            return !isEdited
+        case .alertSecondButtonReturn:
+            return true
+        default:
+            return false
         }
     }
 
