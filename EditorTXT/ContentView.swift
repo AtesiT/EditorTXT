@@ -121,6 +121,35 @@ final class EditorDocument: ObservableObject {
     }
 }
 
+private final class WindowDelegateCoordinator: NSObject, NSWindowDelegate {
+    var document: EditorDocument?
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        document?.confirmDiscardChanges() ?? true
+    }
+}
+
+private struct WindowCloseHandler: NSViewRepresentable {
+    let document: EditorDocument
+
+    func makeCoordinator() -> WindowDelegateCoordinator {
+        WindowDelegateCoordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            context.coordinator.document = document
+            view.window?.delegate = context.coordinator
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.document = document
+    }
+}
+
 private struct WindowConfigurator: NSViewRepresentable {
     let title: String
     let isEdited: Bool
@@ -187,11 +216,14 @@ struct ContentView: View {
         }
         .frame(minWidth: 500, minHeight: 400)
         .background(
-            WindowConfigurator(
-                title: document.displayName,
-                isEdited: document.isEdited,
-                representedURL: document.fileURL
-            )
+            ZStack {
+                WindowConfigurator(
+                    title: document.displayName,
+                    isEdited: document.isEdited,
+                    representedURL: document.fileURL
+                )
+                WindowCloseHandler(document: document)
+            }
         )
     }
 }
