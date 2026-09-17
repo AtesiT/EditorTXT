@@ -205,6 +205,38 @@ private struct StatusBarView: View {
     }
 }
 
+private struct SearchBarView: View {
+    @Binding var searchQuery: String
+    let onClose: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+
+            TextField("Найти", text: $searchQuery)
+                .textFieldStyle(.plain)
+                .focused($isFocused)
+
+            Spacer()
+
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .onAppear {
+            isFocused = true
+        }
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var document: EditorDocument
 
@@ -213,6 +245,13 @@ struct ContentView: View {
             TextEditor(text: $document.text)
                 .font(.system(size: 14, design: .monospaced))
                 .padding(8)
+
+            if document.isSearchBarVisible {
+                Divider()
+                SearchBarView(searchQuery: $document.searchQuery) {
+                    document.isSearchBarVisible = false
+                }
+            }
 
             Divider()
 
