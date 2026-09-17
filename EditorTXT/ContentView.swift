@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import UniformTypeIdentifiers
+import AppKit
 
 final class EditorDocument: ObservableObject {
     @Published var text: String = "" {
@@ -237,14 +238,107 @@ private struct SearchBarView: View {
     }
 }
 
+private struct EditorTextView: NSViewRepresentable {
+    @Binding var text: String
+    var searchQuery: String
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = NSTextView()
+        textView.delegate = context.coordinator
+        textView.isRichText = false
+        textView.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.allowsUndo = true
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.drawsBackground = true
+        textView.textColor = NSColor.labelColor
+
+        textView.autoresizingMask = [.width]
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainer?.widthTracksTextView = true
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+
+        textView.string = text
+        context.coordinator.textView = textView
+
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? NSTextView else { return }
+
+        if textView.string != text {
+            let selectedRanges = textView.selectedRanges
+            textView.string = text
+            textView.selectedRanges = selectedRanges
+        }
+
+        context.coordinator.applyHighlight(to: textView, searchQuery: searchQuery)
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var text: Binding<String>
+        weak var textView: NSTextView?
+
+        init(text: Binding<String>) {
+            self.text = text
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            text.wrappedValue = textView.string
+        }
+
+        func applyHighlight(to textView: NSTextView, searchQuery: String) {
+            guard let textStorage = textView.textStorage else { return }
+
+            let fullRange = NSRange(location: 0, length: textStorage.length)
+            textStorage.removeAttribute(.backgroundColor, range: fullRange)
+
+            guard !searchQuery.isEmpty else { return }
+
+            let content = textStorage.string as NSString
+            var searchRange = NSRange(location: 0, length: content.length)
+
+            while searchRange.location < content.length {
+                let foundRange = content.range(of: searchQuery, options: .caseInsensitive, range: searchRange)
+                if foundRange.location == NSNotFound { break }
+
+                textStorage.addAttribute(
+                    .backgroundColor,
+                    value: NSColor.orange.withAlphaComponent(0.5),
+                    range: foundRange
+                )
+
+                let nextLocation = foundRange.location + foundRange.length
+                searchRange = NSRange(location: nextLocation, length: content.length - nextLocation)
+            }
+        }
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var document: EditorDocument
 
     var body: some View {
         VStack(spacing: 0) {
-            TextEditor(text: $document.text)
-                .font(.system(size: 14, design: .monospaced))
-                .padding(8)
+            EditorTextView(text: $document.text, searchQuery: document.searchQuery)
 
             if document.isSearchBarVisible {
                 Divider()
