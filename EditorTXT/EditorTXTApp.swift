@@ -80,6 +80,15 @@ struct EditorTXTApp: App {
                 .keyboardShortcut("s", modifiers: [.command, .shift])
             }
 
+            CommandGroup(after: .textEditing) {
+                Divider()
+
+                Button("Find...") {
+                    document.isSearchBarVisible.toggle()
+                }
+                .keyboardShortcut("f", modifiers: .command)
+            }
+
             CommandMenu("View") {
                 ForEach(AppTheme.allCases) { theme in
                     Button {

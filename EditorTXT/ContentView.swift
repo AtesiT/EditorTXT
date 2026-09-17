@@ -11,6 +11,14 @@ final class EditorDocument: ObservableObject {
     }
     @Published var fileURL: URL?
     @Published var isEdited: Bool = false
+    @Published var searchQuery: String = ""
+    @Published var isSearchBarVisible: Bool = false {
+        didSet {
+            if !isSearchBarVisible {
+                searchQuery = ""
+            }
+        }
+    }
 
     private var isLoading = false
 
