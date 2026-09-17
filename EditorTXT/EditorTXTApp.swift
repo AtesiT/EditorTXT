@@ -24,8 +24,20 @@ enum AppTheme: String, CaseIterable, Identifiable {
     }
 }
 
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var document: EditorDocument?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if let document, !document.confirmDiscardChanges() {
+            return .terminateCancel
+        }
+        return .terminateNow
+    }
+}
+
 @main
 struct EditorTXTApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var document = EditorDocument()
     @AppStorage("appTheme") private var themeRawValue: String = AppTheme.system.rawValue
 
@@ -39,6 +51,9 @@ struct EditorTXTApp: App {
                 .environmentObject(document)
                 .frame(minWidth: 500, minHeight: 400)
                 .preferredColorScheme(currentTheme.colorScheme)
+                .onAppear {
+                    appDelegate.document = document
+                }
         }
         .commands {
             CommandGroup(replacing: .newItem) {
