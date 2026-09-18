@@ -265,6 +265,8 @@ private struct SearchBarView: View {
 private struct EditorTextView: NSViewRepresentable {
     @Binding var text: String
     var searchQuery: String
+    var currentMatchIndex: Int
+    var onMatchesCountChange: (Int) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text)
@@ -313,7 +315,15 @@ private struct EditorTextView: NSViewRepresentable {
             textView.selectedRanges = selectedRanges
         }
 
-        context.coordinator.applyHighlight(to: textView, searchQuery: searchQuery)
+        context.coordinator.applyHighlight(
+            to: textView,
+            searchQuery: searchQuery,
+            currentMatchIndex: currentMatchIndex
+        ) { count in
+            DispatchQueue.main.async {
+                onMatchesCountChange(count)
+            }
+        }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -329,30 +339,48 @@ private struct EditorTextView: NSViewRepresentable {
             text.wrappedValue = textView.string
         }
 
-        func applyHighlight(to textView: NSTextView, searchQuery: String) {
+        func applyHighlight(
+            to textView: NSTextView,
+            searchQuery: String,
+            currentMatchIndex: Int,
+            countHandler: (Int) -> Void
+        ) {
             guard let textStorage = textView.textStorage else { return }
 
             let fullRange = NSRange(location: 0, length: textStorage.length)
             textStorage.removeAttribute(.backgroundColor, range: fullRange)
 
-            guard !searchQuery.isEmpty else { return }
+            guard !searchQuery.isEmpty else {
+                countHandler(0)
+                return
+            }
 
             let content = textStorage.string as NSString
+            var ranges: [NSRange] = []
             var searchRange = NSRange(location: 0, length: content.length)
 
             while searchRange.location < content.length {
                 let foundRange = content.range(of: searchQuery, options: .caseInsensitive, range: searchRange)
                 if foundRange.location == NSNotFound { break }
 
-                textStorage.addAttribute(
-                    .backgroundColor,
-                    value: NSColor.orange.withAlphaComponent(0.5),
-                    range: foundRange
-                )
+                ranges.append(foundRange)
 
                 let nextLocation = foundRange.location + foundRange.length
                 searchRange = NSRange(location: nextLocation, length: content.length - nextLocation)
             }
+
+            for (index, range) in ranges.enumerated() {
+                let color: NSColor = index == currentMatchIndex
+                    ? NSColor.orange
+                    : NSColor.orange.withAlphaComponent(0.35)
+                textStorage.addAttribute(.backgroundColor, value: color, range: range)
+            }
+
+            if ranges.indices.contains(currentMatchIndex) {
+                textView.scrollRangeToVisible(ranges[currentMatchIndex])
+            }
+
+            countHandler(ranges.count)
         }
     }
 }
@@ -362,7 +390,14 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            EditorTextView(text: $document.text, searchQuery: document.searchQuery)
+            EditorTextView(
+                text: $document.text,
+                searchQuery: document.searchQuery,
+                currentMatchIndex: document.currentMatchIndex,
+                onMatchesCountChange: { count in
+                    document.matchesCount = count
+                }
+            )
 
             if document.isSearchBarVisible {
                 Divider()
