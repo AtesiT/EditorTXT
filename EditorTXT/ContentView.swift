@@ -232,9 +232,17 @@ private struct StatusBarView: View {
 
 private struct SearchBarView: View {
     @Binding var searchQuery: String
+    let currentMatchIndex: Int
+    let matchesCount: Int
+    let onNext: () -> Void
+    let onPrevious: () -> Void
     let onClose: () -> Void
 
     @FocusState private var isFocused: Bool
+
+    private var matchesLabel: String {
+        matchesCount == 0 ? "Нет совпадений" : "\(currentMatchIndex + 1) из \(matchesCount)"
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -245,7 +253,22 @@ private struct SearchBarView: View {
                 .textFieldStyle(.plain)
                 .focused($isFocused)
 
-            Spacer()
+            Text(matchesLabel)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .frame(minWidth: 90, alignment: .trailing)
+
+            Button(action: onPrevious) {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.plain)
+            .disabled(matchesCount == 0)
+
+            Button(action: onNext) {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.plain)
+            .disabled(matchesCount == 0)
 
             Button(action: onClose) {
                 Image(systemName: "xmark.circle.fill")
@@ -401,9 +424,14 @@ struct ContentView: View {
 
             if document.isSearchBarVisible {
                 Divider()
-                SearchBarView(searchQuery: $document.searchQuery) {
-                    document.isSearchBarVisible = false
-                }
+                SearchBarView(
+                    searchQuery: $document.searchQuery,
+                    currentMatchIndex: document.currentMatchIndex,
+                    matchesCount: document.matchesCount,
+                    onNext: { document.goToNextMatch() },
+                    onPrevious: { document.goToPreviousMatch() },
+                    onClose: { document.isSearchBarVisible = false }
+                )
             }
 
             Divider()
