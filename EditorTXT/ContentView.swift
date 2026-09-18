@@ -12,11 +12,25 @@ final class EditorDocument: ObservableObject {
     }
     @Published var fileURL: URL?
     @Published var isEdited: Bool = false
-    @Published var searchQuery: String = ""
+    @Published var searchQuery: String = "" {
+        didSet {
+            currentMatchIndex = 0
+        }
+    }
     @Published var isSearchBarVisible: Bool = false {
         didSet {
             if !isSearchBarVisible {
                 searchQuery = ""
+            }
+        }
+    }
+    @Published var currentMatchIndex: Int = 0
+    @Published var matchesCount: Int = 0 {
+        didSet {
+            if matchesCount == 0 {
+                currentMatchIndex = 0
+            } else if currentMatchIndex >= matchesCount {
+                currentMatchIndex = matchesCount - 1
             }
         }
     }
@@ -110,6 +124,16 @@ final class EditorDocument: ObservableObject {
         default:
             return false
         }
+    }
+
+    func goToNextMatch() {
+        guard matchesCount > 0 else { return }
+        currentMatchIndex = (currentMatchIndex + 1) % matchesCount
+    }
+
+    func goToPreviousMatch() {
+        guard matchesCount > 0 else { return }
+        currentMatchIndex = (currentMatchIndex - 1 + matchesCount) % matchesCount
     }
 
     private func writeToFile(url: URL) {
