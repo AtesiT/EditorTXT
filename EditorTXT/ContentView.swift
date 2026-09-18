@@ -453,6 +453,21 @@ struct ContentView: View {
                 WindowCloseHandler(document: document)
             }
         )
+        .keyboardShortcut("f", modifiers: .command)
+        .onKeyPress(.escape) {
+            if document.isSearchBarVisible {
+                document.isSearchBarVisible = false
+                return .handled
+            }
+            return .ignored
+        }
+        .background(
+            Button("") {
+                document.isSearchBarVisible.toggle()
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .hidden()
+        )
     }
 }
 
