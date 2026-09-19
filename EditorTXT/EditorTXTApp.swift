@@ -84,9 +84,16 @@ struct EditorTXTApp: App {
                 Divider()
 
                 Button("Find...") {
+                    document.isReplaceRowVisible = false
                     document.isSearchBarVisible.toggle()
                 }
                 .keyboardShortcut("f", modifiers: .command)
+
+                Button("Find and Replace...") {
+                    document.isSearchBarVisible = true
+                    document.isReplaceRowVisible = true
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
             }
 
             CommandMenu("View") {

@@ -17,13 +17,16 @@ final class EditorDocument: ObservableObject {
             currentMatchIndex = 0
         }
     }
+    @Published var replaceQuery: String = ""
     @Published var isSearchBarVisible: Bool = false {
         didSet {
             if !isSearchBarVisible {
                 searchQuery = ""
+                isReplaceRowVisible = false
             }
         }
     }
+    @Published var isReplaceRowVisible: Bool = false
     @Published var currentMatchIndex: Int = 0
     @Published var matchesCount: Int = 0 {
         didSet {
@@ -134,6 +137,47 @@ final class EditorDocument: ObservableObject {
     func goToPreviousMatch() {
         guard matchesCount > 0 else { return }
         currentMatchIndex = (currentMatchIndex - 1 + matchesCount) % matchesCount
+    }
+
+    func replaceCurrentMatch() {
+        let ranges = matchRanges(in: text, query: searchQuery)
+        guard ranges.indices.contains(currentMatchIndex) else { return }
+
+        let range = ranges[currentMatchIndex]
+        let nsText = text as NSString
+        text = nsText.replacingCharacters(in: range, with: replaceQuery)
+    }
+
+    func replaceAllMatches() {
+        let ranges = matchRanges(in: text, query: searchQuery)
+        guard !ranges.isEmpty else { return }
+
+        let mutableText = NSMutableString(string: text)
+        for range in ranges.reversed() {
+            mutableText.replaceCharacters(in: range, with: replaceQuery)
+        }
+        text = mutableText as String
+        currentMatchIndex = 0
+    }
+
+    private func matchRanges(in text: String, query: String) -> [NSRange] {
+        guard !query.isEmpty else { return [] }
+
+        let content = text as NSString
+        var ranges: [NSRange] = []
+        var searchRange = NSRange(location: 0, length: content.length)
+
+        while searchRange.location < content.length {
+            let foundRange = content.range(of: query, options: .caseInsensitive, range: searchRange)
+            if foundRange.location == NSNotFound { break }
+
+            ranges.append(foundRange)
+
+            let nextLocation = foundRange.location + foundRange.length
+            searchRange = NSRange(location: nextLocation, length: content.length - nextLocation)
+        }
+
+        return ranges
     }
 
     private func writeToFile(url: URL) {
@@ -285,6 +329,34 @@ private struct SearchBarView: View {
     }
 }
 
+private struct ReplaceBarView: View {
+    @Binding var replaceQuery: String
+    let isReplaceDisabled: Bool
+    let onReplace: () -> Void
+    let onReplaceAll: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .foregroundColor(.secondary)
+
+            TextField("Заменить на", text: $replaceQuery)
+                .textFieldStyle(.plain)
+
+            Spacer()
+
+            Button("Заменить", action: onReplace)
+                .disabled(isReplaceDisabled)
+
+            Button("Заменить всё", action: onReplaceAll)
+                .disabled(isReplaceDisabled)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+}
+
 private struct EditorTextView: NSViewRepresentable {
     @Binding var text: String
     var searchQuery: String
@@ -432,6 +504,16 @@ struct ContentView: View {
                     onPrevious: { document.goToPreviousMatch() },
                     onClose: { document.isSearchBarVisible = false }
                 )
+
+                if document.isReplaceRowVisible {
+                    Divider()
+                    ReplaceBarView(
+                        replaceQuery: $document.replaceQuery,
+                        isReplaceDisabled: document.matchesCount == 0,
+                        onReplace: { document.replaceCurrentMatch() },
+                        onReplaceAll: { document.replaceAllMatches() }
+                    )
+                }
             }
 
             Divider()
@@ -453,7 +535,6 @@ struct ContentView: View {
                 WindowCloseHandler(document: document)
             }
         )
-        .keyboardShortcut("f", modifiers: .command)
         .onKeyPress(.escape) {
             if document.isSearchBarVisible {
                 document.isSearchBarVisible = false
@@ -461,13 +542,6 @@ struct ContentView: View {
             }
             return .ignored
         }
-        .background(
-            Button("") {
-                document.isSearchBarVisible.toggle()
-            }
-            .keyboardShortcut("f", modifiers: .command)
-            .hidden()
-        )
     }
 }
 
