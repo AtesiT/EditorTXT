@@ -319,6 +319,20 @@ private struct SearchBarView: View {
             }
             .buttonStyle(.plain)
             .foregroundColor(.secondary)
+
+            Button(action: onNext) {
+                EmptyView()
+            }
+            .keyboardShortcut(.return, modifiers: [])
+            .frame(width: 0, height: 0)
+            .hidden()
+
+            Button(action: onPrevious) {
+                EmptyView()
+            }
+            .keyboardShortcut(.return, modifiers: [.shift])
+            .frame(width: 0, height: 0)
+            .hidden()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -535,13 +549,6 @@ struct ContentView: View {
                 WindowCloseHandler(document: document)
             }
         )
-        .onKeyPress(.escape) {
-            if document.isSearchBarVisible {
-                document.isSearchBarVisible = false
-                return .handled
-            }
-            return .ignored
-        }
     }
 }
 
