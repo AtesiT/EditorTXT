@@ -37,6 +37,8 @@ final class EditorDocument: ObservableObject {
             }
         }
     }
+    @Published var replaceCurrentTrigger: Int = 0
+    @Published var replaceAllTrigger: Int = 0
 
     private var isLoading = false
 
@@ -140,44 +142,11 @@ final class EditorDocument: ObservableObject {
     }
 
     func replaceCurrentMatch() {
-        let ranges = matchRanges(in: text, query: searchQuery)
-        guard ranges.indices.contains(currentMatchIndex) else { return }
-
-        let range = ranges[currentMatchIndex]
-        let nsText = text as NSString
-        text = nsText.replacingCharacters(in: range, with: replaceQuery)
+        replaceCurrentTrigger += 1
     }
 
     func replaceAllMatches() {
-        let ranges = matchRanges(in: text, query: searchQuery)
-        guard !ranges.isEmpty else { return }
-
-        let mutableText = NSMutableString(string: text)
-        for range in ranges.reversed() {
-            mutableText.replaceCharacters(in: range, with: replaceQuery)
-        }
-        text = mutableText as String
-        currentMatchIndex = 0
-    }
-
-    private func matchRanges(in text: String, query: String) -> [NSRange] {
-        guard !query.isEmpty else { return [] }
-
-        let content = text as NSString
-        var ranges: [NSRange] = []
-        var searchRange = NSRange(location: 0, length: content.length)
-
-        while searchRange.location < content.length {
-            let foundRange = content.range(of: query, options: .caseInsensitive, range: searchRange)
-            if foundRange.location == NSNotFound { break }
-
-            ranges.append(foundRange)
-
-            let nextLocation = foundRange.location + foundRange.length
-            searchRange = NSRange(location: nextLocation, length: content.length - nextLocation)
-        }
-
-        return ranges
+        replaceAllTrigger += 1
     }
 
     private func writeToFile(url: URL) {
@@ -374,7 +343,10 @@ private struct ReplaceBarView: View {
 private struct EditorTextView: NSViewRepresentable {
     @Binding var text: String
     var searchQuery: String
+    var replaceQuery: String
     var currentMatchIndex: Int
+    var replaceCurrentTrigger: Int
+    var replaceAllTrigger: Int
     var onMatchesCountChange: (Int) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -417,6 +389,7 @@ private struct EditorTextView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
+        let coordinator = context.coordinator
 
         if textView.string != text {
             let selectedRanges = textView.selectedRanges
@@ -424,20 +397,38 @@ private struct EditorTextView: NSViewRepresentable {
             textView.selectedRanges = selectedRanges
         }
 
-        context.coordinator.applyHighlight(
-            to: textView,
-            searchQuery: searchQuery,
-            currentMatchIndex: currentMatchIndex
-        ) { count in
+        if replaceCurrentTrigger != coordinator.lastReplaceCurrentTrigger {
+            coordinator.lastReplaceCurrentTrigger = replaceCurrentTrigger
+            let query = searchQuery
+            let replacement = replaceQuery
+            let index = currentMatchIndex
             DispatchQueue.main.async {
-                onMatchesCountChange(count)
+                coordinator.replaceCurrentMatch(in: textView, query: query, replacement: replacement, index: index)
             }
+        }
+
+        if replaceAllTrigger != coordinator.lastReplaceAllTrigger {
+            coordinator.lastReplaceAllTrigger = replaceAllTrigger
+            let query = searchQuery
+            let replacement = replaceQuery
+            DispatchQueue.main.async {
+                coordinator.replaceAllMatches(in: textView, query: query, replacement: replacement)
+            }
+        }
+
+        let ranges = coordinator.matches(in: textView.string, query: searchQuery)
+        coordinator.highlight(textView: textView, ranges: ranges, currentMatchIndex: currentMatchIndex)
+
+        DispatchQueue.main.async {
+            onMatchesCountChange(ranges.count)
         }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
         weak var textView: NSTextView?
+        var lastReplaceCurrentTrigger: Int = 0
+        var lastReplaceAllTrigger: Int = 0
 
         init(text: Binding<String>) {
             self.text = text
@@ -448,35 +439,31 @@ private struct EditorTextView: NSViewRepresentable {
             text.wrappedValue = textView.string
         }
 
-        func applyHighlight(
-            to textView: NSTextView,
-            searchQuery: String,
-            currentMatchIndex: Int,
-            countHandler: (Int) -> Void
-        ) {
-            guard let textStorage = textView.textStorage else { return }
+        func matches(in content: String, query: String) -> [NSRange] {
+            guard !query.isEmpty else { return [] }
 
-            let fullRange = NSRange(location: 0, length: textStorage.length)
-            textStorage.removeAttribute(.backgroundColor, range: fullRange)
-
-            guard !searchQuery.isEmpty else {
-                countHandler(0)
-                return
-            }
-
-            let content = textStorage.string as NSString
+            let nsContent = content as NSString
             var ranges: [NSRange] = []
-            var searchRange = NSRange(location: 0, length: content.length)
+            var searchRange = NSRange(location: 0, length: nsContent.length)
 
-            while searchRange.location < content.length {
-                let foundRange = content.range(of: searchQuery, options: .caseInsensitive, range: searchRange)
+            while searchRange.location < nsContent.length {
+                let foundRange = nsContent.range(of: query, options: .caseInsensitive, range: searchRange)
                 if foundRange.location == NSNotFound { break }
 
                 ranges.append(foundRange)
 
                 let nextLocation = foundRange.location + foundRange.length
-                searchRange = NSRange(location: nextLocation, length: content.length - nextLocation)
+                searchRange = NSRange(location: nextLocation, length: nsContent.length - nextLocation)
             }
+
+            return ranges
+        }
+
+        func highlight(textView: NSTextView, ranges: [NSRange], currentMatchIndex: Int) {
+            guard let textStorage = textView.textStorage else { return }
+
+            let fullRange = NSRange(location: 0, length: textStorage.length)
+            textStorage.removeAttribute(.backgroundColor, range: fullRange)
 
             for (index, range) in ranges.enumerated() {
                 let color: NSColor = index == currentMatchIndex
@@ -488,8 +475,42 @@ private struct EditorTextView: NSViewRepresentable {
             if ranges.indices.contains(currentMatchIndex) {
                 textView.scrollRangeToVisible(ranges[currentMatchIndex])
             }
+        }
 
-            countHandler(ranges.count)
+        func replaceCurrentMatch(in textView: NSTextView, query: String, replacement: String, index: Int) {
+            let ranges = matches(in: textView.string, query: query)
+            guard ranges.indices.contains(index) else { return }
+
+            performReplace(in: textView, range: ranges[index], with: replacement, actionName: "Replace")
+        }
+
+        func replaceAllMatches(in textView: NSTextView, query: String, replacement: String) {
+            let ranges = matches(in: textView.string, query: query)
+            guard !ranges.isEmpty else { return }
+
+            textView.undoManager?.beginUndoGrouping()
+            textView.undoManager?.setActionName("Replace All")
+
+            for range in ranges.reversed() {
+                if textView.shouldChangeText(in: range, replacementString: replacement) {
+                    textView.textStorage?.replaceCharacters(in: range, with: replacement)
+                    textView.didChangeText()
+                }
+            }
+
+            textView.undoManager?.endUndoGrouping()
+        }
+
+        private func performReplace(in textView: NSTextView, range: NSRange, with replacement: String, actionName: String) {
+            textView.undoManager?.beginUndoGrouping()
+            textView.undoManager?.setActionName(actionName)
+
+            if textView.shouldChangeText(in: range, replacementString: replacement) {
+                textView.textStorage?.replaceCharacters(in: range, with: replacement)
+                textView.didChangeText()
+            }
+
+            textView.undoManager?.endUndoGrouping()
         }
     }
 }
@@ -502,7 +523,10 @@ struct ContentView: View {
             EditorTextView(
                 text: $document.text,
                 searchQuery: document.searchQuery,
+                replaceQuery: document.replaceQuery,
                 currentMatchIndex: document.currentMatchIndex,
+                replaceCurrentTrigger: document.replaceCurrentTrigger,
+                replaceAllTrigger: document.replaceAllTrigger,
                 onMatchesCountChange: { count in
                     document.matchesCount = count
                 }
