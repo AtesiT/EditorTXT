@@ -340,6 +340,67 @@ private struct ReplaceBarView: View {
     }
 }
 
+private final class LineNumberRulerView: NSRulerView {
+    weak var textView: NSTextView?
+    var font: NSFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+    var textColor: NSColor = NSColor.secondaryLabelColor.withAlphaComponent(0.4)
+
+    init(textView: NSTextView) {
+        self.textView = textView
+        super.init(scrollView: textView.enclosingScrollView, orientation: .verticalRuler)
+        clientView = textView
+        ruleThickness = 36
+    }
+
+    required init(coder: NSCoder) {
+        fatalError()
+    }
+
+    override func drawHashMarksAndLabels(in rect: NSRect) {
+        guard let textView = textView,
+              let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else { return }
+
+        let relativePoint = convert(NSPoint.zero, from: textView)
+        let containerInset = textView.textContainerInset.height
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
+
+        func drawNumber(_ number: Int, forLineRect lineRect: NSRect) {
+            let string = "\(number)" as NSString
+            let size = string.size(withAttributes: attributes)
+            let x = ruleThickness - size.width - 6
+            let y = relativePoint.y + containerInset + lineRect.minY + (lineRect.height - size.height) / 2.0
+            string.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
+        }
+
+        let visibleGlyphRange = layoutManager.glyphRange(forBoundingRect: textView.visibleRect, in: textContainer)
+        let firstVisibleCharacterIndex = layoutManager.characterIndexForGlyph(at: visibleGlyphRange.location)
+
+        let content = textView.string as NSString
+        var lineNumber = content.substring(to: firstVisibleCharacterIndex).components(separatedBy: "\n").count
+
+        var glyphIndex = visibleGlyphRange.location
+
+        while glyphIndex < NSMaxRange(visibleGlyphRange) {
+            let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+            let lineCharacterRange = content.lineRange(for: NSRange(location: characterIndex, length: 0))
+            let lineGlyphRange = layoutManager.glyphRange(forCharacterRange: lineCharacterRange, actualCharacterRange: nil)
+
+            var effectiveRange = NSRange(location: 0, length: 0)
+            let lineRect = layoutManager.lineFragmentRect(forGlyphAt: lineGlyphRange.location, effectiveRange: &effectiveRange)
+
+            drawNumber(lineNumber, forLineRect: lineRect)
+
+            lineNumber += 1
+            glyphIndex = NSMaxRange(lineGlyphRange)
+        }
+
+        if layoutManager.extraLineFragmentTextContainer != nil {
+            drawNumber(lineNumber, forLineRect: layoutManager.extraLineFragmentRect)
+        }
+    }
+}
+
 private struct EditorTextView: NSViewRepresentable {
     @Binding var text: String
     var searchQuery: String
@@ -380,9 +441,24 @@ private struct EditorTextView: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
+        scrollView.hasVerticalRuler = true
+        scrollView.rulersVisible = true
+
+        let rulerView = LineNumberRulerView(textView: textView)
+        scrollView.verticalRulerView = rulerView
+
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { _ in
+            rulerView.needsDisplay = true
+        }
 
         textView.string = text
         context.coordinator.textView = textView
+        context.coordinator.rulerView = rulerView
 
         return scrollView
     }
@@ -395,6 +471,7 @@ private struct EditorTextView: NSViewRepresentable {
             let selectedRanges = textView.selectedRanges
             textView.string = text
             textView.selectedRanges = selectedRanges
+            coordinator.rulerView?.needsDisplay = true
         }
 
         if replaceCurrentTrigger != coordinator.lastReplaceCurrentTrigger {
@@ -427,6 +504,7 @@ private struct EditorTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
         weak var textView: NSTextView?
+        weak var rulerView: LineNumberRulerView?
         var lastReplaceCurrentTrigger: Int = 0
         var lastReplaceAllTrigger: Int = 0
 
@@ -437,6 +515,7 @@ private struct EditorTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             text.wrappedValue = textView.string
+            rulerView?.needsDisplay = true
         }
 
         func matches(in content: String, query: String) -> [NSRange] {
@@ -499,6 +578,7 @@ private struct EditorTextView: NSViewRepresentable {
             }
 
             textView.undoManager?.endUndoGrouping()
+            rulerView?.needsDisplay = true
         }
 
         private func performReplace(in textView: NSTextView, range: NSRange, with replacement: String, actionName: String) {
@@ -511,6 +591,7 @@ private struct EditorTextView: NSViewRepresentable {
             }
 
             textView.undoManager?.endUndoGrouping()
+            rulerView?.needsDisplay = true
         }
     }
 }
