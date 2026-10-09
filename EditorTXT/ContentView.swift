@@ -539,23 +539,23 @@ private struct EditorTextView: NSViewRepresentable {
         }
 
         func highlight(textView: NSTextView, ranges: [NSRange], currentMatchIndex: Int) {
-            guard let textStorage = textView.textStorage else { return }
+            guard let layoutManager = textView.layoutManager else { return }
 
-            let fullRange = NSRange(location: 0, length: textStorage.length)
-            textStorage.removeAttribute(.backgroundColor, range: fullRange)
+            let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
+            layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
 
             for (index, range) in ranges.enumerated() {
                 let color: NSColor = index == currentMatchIndex
                     ? NSColor.orange
                     : NSColor.orange.withAlphaComponent(0.35)
-                textStorage.addAttribute(.backgroundColor, value: color, range: range)
+                layoutManager.addTemporaryAttribute(.backgroundColor, value: color, forCharacterRange: range)
             }
 
             if ranges.indices.contains(currentMatchIndex) {
                 textView.scrollRangeToVisible(ranges[currentMatchIndex])
             }
         }
-
+        
         func replaceCurrentMatch(in textView: NSTextView, query: String, replacement: String, index: Int) {
             let ranges = matches(in: textView.string, query: query)
             guard ranges.indices.contains(index) else { return }
