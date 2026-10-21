@@ -105,8 +105,9 @@ final class EditorDocument: ObservableObject {
         panel.canCreateDirectories = true
 
         if panel.runModal() == .OK, let url = panel.url {
-            writeToFile(url: url)
-            self.fileURL = url
+            if writeToFile(url: url) {
+                self.fileURL = url
+            }
         }
     }
 
@@ -149,12 +150,15 @@ final class EditorDocument: ObservableObject {
         replaceAllTrigger += 1
     }
 
-    private func writeToFile(url: URL) {
+    @discardableResult
+    private func writeToFile(url: URL) -> Bool {
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
             isEdited = false
+            return true
         } catch {
             showError("Не удалось сохранить файл: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -555,7 +559,7 @@ private struct EditorTextView: NSViewRepresentable {
                 textView.scrollRangeToVisible(ranges[currentMatchIndex])
             }
         }
-        
+
         func replaceCurrentMatch(in textView: NSTextView, query: String, replacement: String, index: Int) {
             let ranges = matches(in: textView.string, query: query)
             guard ranges.indices.contains(index) else { return }
