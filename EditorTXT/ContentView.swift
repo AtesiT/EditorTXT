@@ -407,6 +407,7 @@ private final class LineNumberRulerView: NSRulerView {
 
 private struct EditorTextView: NSViewRepresentable {
     @Binding var text: String
+    var isSearchBarVisible: Bool
     var searchQuery: String
     var replaceQuery: String
     var currentMatchIndex: Int
@@ -497,12 +498,24 @@ private struct EditorTextView: NSViewRepresentable {
             }
         }
 
-        let ranges = coordinator.matches(in: textView.string, query: searchQuery)
-        coordinator.highlight(textView: textView, ranges: ranges, currentMatchIndex: currentMatchIndex)
-
-        DispatchQueue.main.async {
-            onMatchesCountChange(ranges.count)
+        guard isSearchBarVisible, !searchQuery.isEmpty else {
+            coordinator.clearHighlightIfNeeded(textView: textView)
+            coordinator.reportMatchesCountIfNeeded(0, onChange: onMatchesCountChange)
+            return
         }
+
+        let ranges: [NSRange]
+        if coordinator.cachedSearchedText == textView.string && coordinator.cachedQuery == searchQuery {
+            ranges = coordinator.cachedRanges
+        } else {
+            ranges = coordinator.matches(in: textView.string, query: searchQuery)
+            coordinator.cachedSearchedText = textView.string
+            coordinator.cachedQuery = searchQuery
+            coordinator.cachedRanges = ranges
+        }
+
+        coordinator.highlight(textView: textView, ranges: ranges, currentMatchIndex: currentMatchIndex)
+        coordinator.reportMatchesCountIfNeeded(ranges.count, onChange: onMatchesCountChange)
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
@@ -519,6 +532,12 @@ private struct EditorTextView: NSViewRepresentable {
         var lastReplaceCurrentTrigger: Int = 0
         var lastReplaceAllTrigger: Int = 0
         var boundsObserver: NSObjectProtocol?
+
+        var cachedSearchedText: String?
+        var cachedQuery: String?
+        var cachedRanges: [NSRange] = []
+        private var lastReportedMatchesCount: Int = -1
+        private var isHighlightCleared = true
 
         init(text: Binding<String>) {
             self.text = text
@@ -561,6 +580,7 @@ private struct EditorTextView: NSViewRepresentable {
 
             let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
             layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
+            isHighlightCleared = false
 
             for (index, range) in ranges.enumerated() {
                 let color: NSColor = index == currentMatchIndex
@@ -571,6 +591,24 @@ private struct EditorTextView: NSViewRepresentable {
 
             if ranges.indices.contains(currentMatchIndex) {
                 textView.scrollRangeToVisible(ranges[currentMatchIndex])
+            }
+        }
+
+        func clearHighlightIfNeeded(textView: NSTextView) {
+            guard !isHighlightCleared, let layoutManager = textView.layoutManager else { return }
+            let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
+            layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
+            isHighlightCleared = true
+            cachedSearchedText = nil
+            cachedQuery = nil
+            cachedRanges = []
+        }
+
+        func reportMatchesCountIfNeeded(_ count: Int, onChange: @escaping (Int) -> Void) {
+            guard count != lastReportedMatchesCount else { return }
+            lastReportedMatchesCount = count
+            DispatchQueue.main.async {
+                onChange(count)
             }
         }
 
@@ -621,6 +659,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             EditorTextView(
                 text: $document.text,
+                isSearchBarVisible: document.isSearchBarVisible,
                 searchQuery: document.searchQuery,
                 replaceQuery: document.replaceQuery,
                 currentMatchIndex: document.currentMatchIndex,
