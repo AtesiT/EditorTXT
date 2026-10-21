@@ -452,12 +452,12 @@ private struct EditorTextView: NSViewRepresentable {
         scrollView.verticalRulerView = rulerView
 
         scrollView.contentView.postsBoundsChangedNotifications = true
-        NotificationCenter.default.addObserver(
+        context.coordinator.boundsObserver = NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification,
             object: scrollView.contentView,
             queue: .main
-        ) { _ in
-            rulerView.needsDisplay = true
+        ) { [weak rulerView] _ in
+            rulerView?.needsDisplay = true
         }
 
         textView.string = text
@@ -505,15 +505,29 @@ private struct EditorTextView: NSViewRepresentable {
         }
     }
 
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        if let observer = coordinator.boundsObserver {
+            NotificationCenter.default.removeObserver(observer)
+            coordinator.boundsObserver = nil
+        }
+    }
+
     final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
         weak var textView: NSTextView?
         weak var rulerView: LineNumberRulerView?
         var lastReplaceCurrentTrigger: Int = 0
         var lastReplaceAllTrigger: Int = 0
+        var boundsObserver: NSObjectProtocol?
 
         init(text: Binding<String>) {
             self.text = text
+        }
+
+        deinit {
+            if let boundsObserver {
+                NotificationCenter.default.removeObserver(boundsObserver)
+            }
         }
 
         func textDidChange(_ notification: Notification) {
