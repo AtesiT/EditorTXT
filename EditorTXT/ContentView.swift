@@ -82,6 +82,7 @@ final class EditorDocument: ObservableObject {
 
     func newDocument() {
         guard confirmDiscardChanges() else { return }
+        isSearchBarVisible = false
         isLoading = true
         text = ""
         fileURL = nil
@@ -98,18 +99,42 @@ final class EditorDocument: ObservableObject {
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
 
-        if panel.runModal() == .OK, let url = panel.url {
-            do {
-                let content = try String(contentsOf: url, encoding: .utf8)
-                isLoading = true
-                self.text = content
-                self.fileURL = url
-                self.isEdited = false
-                isLoading = false
-            } catch {
-                showError("Не удалось открыть файл: \(error.localizedDescription)")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        guard let content = readTextContent(from: url) else {
+            showError("Не удалось открыть файл: неизвестная или неподдерживаемая кодировка.")
+            return
+        }
+
+        isSearchBarVisible = false
+        isLoading = true
+        self.text = content
+        self.fileURL = url
+        self.isEdited = false
+        isLoading = false
+    }
+
+    private func readTextContent(from url: URL) -> String? {
+        var usedEncoding: String.Encoding = .utf8
+
+        if let content = try? String(contentsOf: url, usedEncoding: &usedEncoding) {
+            return content
+        }
+
+        let fallbackEncodings: [String.Encoding] = [
+            .utf8,
+            .windowsCP1251,
+            .isoLatin1,
+            .utf16
+        ]
+
+        for encoding in fallbackEncodings {
+            if let content = try? String(contentsOf: url, encoding: encoding) {
+                return content
             }
         }
+
+        return nil
     }
 
     func saveFile() {
