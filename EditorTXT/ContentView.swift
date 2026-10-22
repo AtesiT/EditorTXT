@@ -279,6 +279,7 @@ private struct SearchBarView: View {
             TextField("Найти", text: $searchQuery)
                 .textFieldStyle(.plain)
                 .focused($isFocused)
+                .onSubmit { onNext() }
 
             Text(matchesLabel)
                 .font(.system(size: 11))
@@ -290,6 +291,7 @@ private struct SearchBarView: View {
             }
             .buttonStyle(.plain)
             .disabled(matchesCount == 0)
+            .keyboardShortcut(.return, modifiers: [.shift])
 
             Button(action: onNext) {
                 Image(systemName: "chevron.down")
@@ -302,20 +304,6 @@ private struct SearchBarView: View {
             }
             .buttonStyle(.plain)
             .foregroundColor(.secondary)
-
-            Button(action: onNext) {
-                EmptyView()
-            }
-            .keyboardShortcut(.return, modifiers: [])
-            .frame(width: 0, height: 0)
-            .hidden()
-
-            Button(action: onPrevious) {
-                EmptyView()
-            }
-            .keyboardShortcut(.return, modifiers: [.shift])
-            .frame(width: 0, height: 0)
-            .hidden()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -339,6 +327,7 @@ private struct ReplaceBarView: View {
 
             TextField("Заменить на", text: $replaceQuery)
                 .textFieldStyle(.plain)
+                .onSubmit { onReplace() }
 
             Spacer()
 
