@@ -536,7 +536,7 @@ private struct EditorTextView: NSViewRepresentable {
             coordinator.cachedRanges = ranges
         }
 
-        coordinator.highlight(textView: textView, ranges: ranges, currentMatchIndex: currentMatchIndex)
+        coordinator.highlightIfNeeded(textView: textView, ranges: ranges, currentMatchIndex: currentMatchIndex)
         coordinator.reportMatchesCountIfNeeded(ranges.count, onChange: onMatchesCountChange)
     }
 
@@ -560,6 +560,9 @@ private struct EditorTextView: NSViewRepresentable {
         var cachedRanges: [NSRange] = []
         private var lastReportedMatchesCount: Int = -1
         private var isHighlightCleared = true
+
+        private var lastHighlightedRanges: [NSRange] = []
+        private var lastHighlightedIndex: Int = -1
 
         init(text: Binding<String>) {
             self.text = text
@@ -597,7 +600,18 @@ private struct EditorTextView: NSViewRepresentable {
             return ranges
         }
 
-        func highlight(textView: NSTextView, ranges: [NSRange], currentMatchIndex: Int) {
+        func highlightIfNeeded(textView: NSTextView, ranges: [NSRange], currentMatchIndex: Int) {
+            guard ranges != lastHighlightedRanges || currentMatchIndex != lastHighlightedIndex else {
+                return
+            }
+
+            highlight(textView: textView, ranges: ranges, currentMatchIndex: currentMatchIndex)
+
+            lastHighlightedRanges = ranges
+            lastHighlightedIndex = currentMatchIndex
+        }
+
+        private func highlight(textView: NSTextView, ranges: [NSRange], currentMatchIndex: Int) {
             guard let layoutManager = textView.layoutManager else { return }
 
             let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
@@ -617,6 +631,9 @@ private struct EditorTextView: NSViewRepresentable {
         }
 
         func clearHighlightIfNeeded(textView: NSTextView) {
+            lastHighlightedRanges = []
+            lastHighlightedIndex = -1
+
             guard !isHighlightCleared, let layoutManager = textView.layoutManager else { return }
             let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
             layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
@@ -657,6 +674,7 @@ private struct EditorTextView: NSViewRepresentable {
 
             textView.undoManager?.endUndoGrouping()
             rulerView?.needsDisplay = true
+            invalidateHighlightCache()
         }
 
         private func performReplace(in textView: NSTextView, range: NSRange, with replacement: String, actionName: String) {
@@ -670,6 +688,15 @@ private struct EditorTextView: NSViewRepresentable {
 
             textView.undoManager?.endUndoGrouping()
             rulerView?.needsDisplay = true
+            invalidateHighlightCache()
+        }
+
+        private func invalidateHighlightCache() {
+            lastHighlightedRanges = []
+            lastHighlightedIndex = -1
+            cachedSearchedText = nil
+            cachedQuery = nil
+            cachedRanges = []
         }
     }
 }
