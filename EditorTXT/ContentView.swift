@@ -193,7 +193,7 @@ final class EditorDocument: ObservableObject {
     }
 }
 
-private final class WindowDelegateCoordinator: NSObject, NSWindowDelegate {
+private final class WindowAccessorCoordinator: NSObject, NSWindowDelegate {
     var document: EditorDocument?
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -201,46 +201,34 @@ private final class WindowDelegateCoordinator: NSObject, NSWindowDelegate {
     }
 }
 
-private struct WindowCloseHandler: NSViewRepresentable {
+private struct WindowAccessor: NSViewRepresentable {
     let document: EditorDocument
-
-    func makeCoordinator() -> WindowDelegateCoordinator {
-        WindowDelegateCoordinator()
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async {
-            context.coordinator.document = document
-            view.window?.delegate = context.coordinator
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.document = document
-    }
-}
-
-private struct WindowConfigurator: NSViewRepresentable {
     let title: String
     let isEdited: Bool
     let representedURL: URL?
 
+    func makeCoordinator() -> WindowAccessorCoordinator {
+        WindowAccessorCoordinator()
+    }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            configure(view)
+            configure(view, context: context)
         }
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        configure(nsView)
+        configure(nsView, context: context)
     }
 
-    private func configure(_ view: NSView) {
+    private func configure(_ view: NSView, context: Context) {
         guard let window = view.window else { return }
+
+        context.coordinator.document = document
+        window.delegate = context.coordinator
+
         window.title = title
         window.isDocumentEdited = isEdited
         window.representedURL = representedURL
@@ -751,14 +739,12 @@ struct ContentView: View {
         }
         .frame(minWidth: 500, minHeight: 400)
         .background(
-            ZStack {
-                WindowConfigurator(
-                    title: document.displayName,
-                    isEdited: document.isEdited,
-                    representedURL: document.fileURL
-                )
-                WindowCloseHandler(document: document)
-            }
+            WindowAccessor(
+                document: document,
+                title: document.displayName,
+                isEdited: document.isEdited,
+                representedURL: document.fileURL
+            )
         )
     }
 }
