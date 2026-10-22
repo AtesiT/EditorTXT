@@ -6,8 +6,12 @@ import AppKit
 final class EditorDocument: ObservableObject {
     @Published var text: String = "" {
         didSet {
-            guard !isLoading else { return }
+            guard !isLoading else {
+                recomputeStats()
+                return
+            }
             isEdited = true
+            recomputeStats()
         }
     }
     @Published var fileURL: URL?
@@ -40,22 +44,40 @@ final class EditorDocument: ObservableObject {
     @Published var replaceCurrentTrigger: Int = 0
     @Published var replaceAllTrigger: Int = 0
 
+    @Published private(set) var characterCount: Int = 0
+    @Published private(set) var wordCount: Int = 0
+    @Published private(set) var lineCount: Int = 1
+
     private var isLoading = false
 
     var displayName: String {
         fileURL?.lastPathComponent ?? "Untitled"
     }
 
-    var characterCount: Int {
-        text.count
-    }
+    private func recomputeStats() {
+        var chars = 0
+        var words = 0
+        var lines = 1
+        var inWord = false
 
-    var wordCount: Int {
-        text.split { $0.isWhitespace || $0.isNewline }.count
-    }
+        for character in text {
+            chars += 1
 
-    var lineCount: Int {
-        text.isEmpty ? 1 : text.components(separatedBy: .newlines).count
+            if character.isNewline {
+                lines += 1
+            }
+
+            if character.isWhitespace || character.isNewline {
+                inWord = false
+            } else if !inWord {
+                inWord = true
+                words += 1
+            }
+        }
+
+        characterCount = chars
+        wordCount = words
+        lineCount = text.isEmpty ? 1 : lines
     }
 
     func newDocument() {
