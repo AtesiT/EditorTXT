@@ -6,41 +6,20 @@ import AppKit
 final class EditorDocument: ObservableObject {
     @Published var text: String = "" {
         didSet {
-            guard !isLoading else {
-                recomputeStats()
-                return
-            }
             isEdited = true
             recomputeStats()
         }
     }
+
     @Published var fileURL: URL?
     @Published var isEdited: Bool = false
-    @Published var searchQuery: String = "" {
-        didSet {
-            currentMatchIndex = 0
-        }
-    }
+
+    @Published var searchQuery: String = ""
     @Published var replaceQuery: String = ""
-    @Published var isSearchBarVisible: Bool = false {
-        didSet {
-            if !isSearchBarVisible {
-                searchQuery = ""
-                isReplaceRowVisible = false
-            }
-        }
-    }
+    @Published var isSearchBarVisible: Bool = false
     @Published var isReplaceRowVisible: Bool = false
     @Published var currentMatchIndex: Int = 0
-    @Published var matchesCount: Int = 0 {
-        didSet {
-            if matchesCount == 0 {
-                currentMatchIndex = 0
-            } else if currentMatchIndex >= matchesCount {
-                currentMatchIndex = matchesCount - 1
-            }
-        }
-    }
+    @Published var matchesCount: Int = 0
     @Published var replaceCurrentTrigger: Int = 0
     @Published var replaceAllTrigger: Int = 0
 
@@ -48,56 +27,52 @@ final class EditorDocument: ObservableObject {
     @Published private(set) var wordCount: Int = 0
     @Published private(set) var lineCount: Int = 1
 
-    private var isLoading = false
-
     var displayName: String {
         fileURL?.lastPathComponent ?? "Untitled"
     }
 
     private func recomputeStats() {
-        var chars = 0
+        var characters = 0
         var words = 0
         var lines = 1
         var inWord = false
 
-        for character in text {
-            chars += 1
-
-            if character.isNewline {
+        for scalar in text.unicodeScalars {
+            characters += 1
+            if scalar == "\n" {
                 lines += 1
             }
-
-            if character.isWhitespace || character.isNewline {
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
                 inWord = false
-            } else if !inWord {
+            } else {
+                if !inWord {
+                    words += 1
+                }
                 inWord = true
-                words += 1
             }
         }
 
-        characterCount = chars
+        characterCount = characters
         wordCount = words
-        lineCount = text.isEmpty ? 1 : lines
+        lineCount = lines
     }
 
     func newDocument() {
-        guard confirmDiscardChanges() else { return }
         isSearchBarVisible = false
-        isLoading = true
+        isReplaceRowVisible = false
+        searchQuery = ""
+        replaceQuery = ""
+
         text = ""
         fileURL = nil
         isEdited = false
-        isLoading = false
     }
 
     func openFile() {
-        guard confirmDiscardChanges() else { return }
-
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.plainText, .text]
+        panel.allowedContentTypes = [.text, .plainText]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.canChooseFiles = true
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
@@ -107,27 +82,22 @@ final class EditorDocument: ObservableObject {
         }
 
         isSearchBarVisible = false
-        isLoading = true
-        self.text = content
-        self.fileURL = url
-        self.isEdited = false
-        isLoading = false
+        isReplaceRowVisible = false
+        searchQuery = ""
+        replaceQuery = ""
+
+        text = content
+        fileURL = url
+        isEdited = false
     }
 
     private func readTextContent(from url: URL) -> String? {
-        var usedEncoding: String.Encoding = .utf8
-
-        if let content = try? String(contentsOf: url, usedEncoding: &usedEncoding) {
+        var detectedEncoding: String.Encoding = .utf8
+        if let content = try? String(contentsOf: url, usedEncoding: &detectedEncoding) {
             return content
         }
 
-        let fallbackEncodings: [String.Encoding] = [
-            .utf8,
-            .windowsCP1251,
-            .isoLatin1,
-            .utf16
-        ]
-
+        let fallbackEncodings: [String.Encoding] = [.utf8, .windowsCP1251, .isoLatin1, .utf16]
         for encoding in fallbackEncodings {
             if let content = try? String(contentsOf: url, encoding: encoding) {
                 return content
@@ -139,7 +109,9 @@ final class EditorDocument: ObservableObject {
 
     func saveFile() {
         if let url = fileURL {
-            writeToFile(url: url)
+            if writeToFile(url: url) {
+                isEdited = false
+            }
         } else {
             saveFileAs()
         }
@@ -148,13 +120,24 @@ final class EditorDocument: ObservableObject {
     func saveFileAs() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = fileURL?.lastPathComponent ?? "Untitled.txt"
-        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = displayName
 
-        if panel.runModal() == .OK, let url = panel.url {
-            if writeToFile(url: url) {
-                self.fileURL = url
-            }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        if writeToFile(url: url) {
+            self.fileURL = url
+            isEdited = false
+        }
+    }
+
+    @discardableResult
+    private func writeToFile(url: URL) -> Bool {
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            showError("Не удалось сохранить файл: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -162,49 +145,20 @@ final class EditorDocument: ObservableObject {
         guard isEdited else { return true }
 
         let alert = NSAlert()
-        alert.messageText = "Сохранить изменения?"
-        alert.informativeText = "В документе есть несохранённые изменения."
+        alert.messageText = "Сохранить изменения перед закрытием?"
+        alert.informativeText = "Несохранённые изменения будут потеряны."
         alert.addButton(withTitle: "Сохранить")
         alert.addButton(withTitle: "Не сохранять")
         alert.addButton(withTitle: "Отмена")
 
-        switch alert.runModal() {
+        let response = alert.runModal()
+        switch response {
         case .alertFirstButtonReturn:
             saveFile()
             return !isEdited
         case .alertSecondButtonReturn:
             return true
         default:
-            return false
-        }
-    }
-
-    func goToNextMatch() {
-        guard matchesCount > 0 else { return }
-        currentMatchIndex = (currentMatchIndex + 1) % matchesCount
-    }
-
-    func goToPreviousMatch() {
-        guard matchesCount > 0 else { return }
-        currentMatchIndex = (currentMatchIndex - 1 + matchesCount) % matchesCount
-    }
-
-    func replaceCurrentMatch() {
-        replaceCurrentTrigger += 1
-    }
-
-    func replaceAllMatches() {
-        replaceAllTrigger += 1
-    }
-
-    @discardableResult
-    private func writeToFile(url: URL) -> Bool {
-        do {
-            try text.write(to: url, atomically: true, encoding: .utf8)
-            isEdited = false
-            return true
-        } catch {
-            showError("Не удалось сохранить файл: \(error.localizedDescription)")
             return false
         }
     }
@@ -218,7 +172,7 @@ final class EditorDocument: ObservableObject {
     }
 }
 
-private final class WindowAccessorCoordinator: NSObject, NSWindowDelegate {
+final class WindowAccessorCoordinator: NSObject, NSWindowDelegate {
     var document: EditorDocument?
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -226,7 +180,7 @@ private final class WindowAccessorCoordinator: NSObject, NSWindowDelegate {
     }
 }
 
-private struct WindowAccessor: NSViewRepresentable {
+struct WindowAccessor: NSViewRepresentable {
     let document: EditorDocument
     let title: String
     let isEdited: Bool
@@ -260,128 +214,106 @@ private struct WindowAccessor: NSViewRepresentable {
     }
 }
 
-private struct StatusBarView: View {
+struct StatusBarView: View {
     let characterCount: Int
     let wordCount: Int
     let lineCount: Int
 
     var body: some View {
         HStack {
-            Text("Строк: \(lineCount)")
+            Text("Символов: \(characterCount)")
             Divider().frame(height: 12)
             Text("Слов: \(wordCount)")
             Divider().frame(height: 12)
-            Text("Символов: \(characterCount)")
+            Text("Строк: \(lineCount)")
             Spacer()
         }
-        .font(.system(size: 11))
+        .font(.caption)
         .foregroundColor(.secondary)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
-private struct SearchBarView: View {
+struct SearchBarView: View {
     @Binding var searchQuery: String
-    let currentMatchIndex: Int
     let matchesCount: Int
-    let onNext: () -> Void
-    let onPrevious: () -> Void
-    let onClose: () -> Void
-
-    @FocusState private var isFocused: Bool
-
-    private var matchesLabel: String {
-        matchesCount == 0 ? "Нет совпадений" : "\(currentMatchIndex + 1) из \(matchesCount)"
-    }
+    let currentMatchIndex: Int
+    var onNext: () -> Void
+    var onPrevious: () -> Void
+    var onClose: () -> Void
+    var onToggleReplace: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.secondary)
+            TextField("Поиск", text: $searchQuery)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    onNext()
+                }
 
-            TextField("Найти", text: $searchQuery)
-                .textFieldStyle(.plain)
-                .focused($isFocused)
-                .onSubmit { onNext() }
-
-            Text(matchesLabel)
-                .font(.system(size: 11))
+            Text(matchesCount > 0 ? "\(currentMatchIndex + 1)/\(matchesCount)" : "0/0")
+                .font(.caption)
                 .foregroundColor(.secondary)
-                .frame(minWidth: 90, alignment: .trailing)
+                .frame(minWidth: 40)
 
             Button(action: onPrevious) {
                 Image(systemName: "chevron.up")
             }
-            .buttonStyle(.plain)
-            .disabled(matchesCount == 0)
             .keyboardShortcut(.return, modifiers: [.shift])
+            .disabled(matchesCount == 0)
 
             Button(action: onNext) {
                 Image(systemName: "chevron.down")
             }
-            .buttonStyle(.plain)
             .disabled(matchesCount == 0)
 
-            Button(action: onClose) {
-                Image(systemName: "xmark.circle.fill")
+            Button(action: onToggleReplace) {
+                Image(systemName: "arrow.triangle.2.circlepath")
             }
-            .buttonStyle(.plain)
-            .foregroundColor(.secondary)
+
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .onAppear {
-            isFocused = true
-        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
     }
 }
 
-private struct ReplaceBarView: View {
+struct ReplaceBarView: View {
     @Binding var replaceQuery: String
-    let isReplaceDisabled: Bool
-    let onReplace: () -> Void
-    let onReplaceAll: () -> Void
+    var onReplace: () -> Void
+    var onReplaceAll: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .foregroundColor(.secondary)
-
             TextField("Заменить на", text: $replaceQuery)
-                .textFieldStyle(.plain)
-                .onSubmit { onReplace() }
-
-            Spacer()
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    onReplace()
+                }
 
             Button("Заменить", action: onReplace)
-                .disabled(isReplaceDisabled)
-
             Button("Заменить всё", action: onReplaceAll)
-                .disabled(isReplaceDisabled)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
     }
 }
 
-private final class LineNumberRulerView: NSRulerView {
+final class LineNumberRulerView: NSRulerView {
     weak var textView: NSTextView?
-    var font: NSFont = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
-    var textColor: NSColor = NSColor.secondaryLabelColor.withAlphaComponent(0.4)
 
     init(textView: NSTextView) {
         self.textView = textView
         super.init(scrollView: textView.enclosingScrollView, orientation: .verticalRuler)
-        clientView = textView
-        ruleThickness = 36
+        self.clientView = textView
+        self.ruleThickness = 40
     }
 
     required init(coder: NSCoder) {
-        fatalError()
+        fatalError("init(coder:) has not been implemented")
     }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
@@ -389,157 +321,99 @@ private final class LineNumberRulerView: NSRulerView {
               let layoutManager = textView.layoutManager,
               let textContainer = textView.textContainer else { return }
 
-        let relativePoint = convert(NSPoint.zero, from: textView)
-        let containerInset = textView.textContainerInset.height
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
-
-        func drawNumber(_ number: Int, forLineRect lineRect: NSRect) {
-            let string = "\(number)" as NSString
-            let size = string.size(withAttributes: attributes)
-            let x = ruleThickness - size.width - 6
-            let y = relativePoint.y + containerInset + lineRect.minY + (lineRect.height - size.height) / 2.0
-            string.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
-        }
-
-        let visibleGlyphRange = layoutManager.glyphRange(forBoundingRect: textView.visibleRect, in: textContainer)
-        let firstVisibleCharacterIndex = layoutManager.characterIndexForGlyph(at: visibleGlyphRange.location)
-
         let content = textView.string as NSString
-        var lineNumber = content.substring(to: firstVisibleCharacterIndex).components(separatedBy: "\n").count
+        let visibleRect = textView.visibleRect
+        let glyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: textContainer)
+        let characterRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
 
-        var glyphIndex = visibleGlyphRange.location
-
-        while glyphIndex < NSMaxRange(visibleGlyphRange) {
-            let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
-            let lineCharacterRange = content.lineRange(for: NSRange(location: characterIndex, length: 0))
-            let lineGlyphRange = layoutManager.glyphRange(forCharacterRange: lineCharacterRange, actualCharacterRange: nil)
-
-            var effectiveRange = NSRange(location: 0, length: 0)
-            let lineRect = layoutManager.lineFragmentRect(forGlyphAt: lineGlyphRange.location, effectiveRange: &effectiveRange)
-
-            drawNumber(lineNumber, forLineRect: lineRect)
-
-            lineNumber += 1
-            glyphIndex = NSMaxRange(lineGlyphRange)
+        var lineNumber = 1
+        if characterRange.location > 0 {
+            lineNumber = content.substring(to: characterRange.location)
+                .components(separatedBy: "\n").count
         }
 
-        if layoutManager.extraLineFragmentTextContainer != nil {
-            drawNumber(lineNumber, forLineRect: layoutManager.extraLineFragmentRect)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10),
+            .foregroundColor: NSColor.secondaryLabelColor
+        ]
+
+        layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { rectForLine, _, _, glyphRangeForLine, _ in
+            let charRangeForLine = layoutManager.characterRange(forGlyphRange: glyphRangeForLine, actualGlyphRange: nil)
+
+            let lineRectInScrollView = textView.convert(rectForLine, to: nil)
+            let lineRectInRuler = self.convert(lineRectInScrollView, from: nil)
+
+            let numberString = "\(lineNumber)"
+            let stringSize = numberString.size(withAttributes: attributes)
+
+            let drawRect = NSRect(
+                x: self.ruleThickness - stringSize.width - 6,
+                y: lineRectInRuler.minY + (lineRectInRuler.height - stringSize.height) / 2,
+                width: stringSize.width,
+                height: stringSize.height
+            )
+
+            numberString.draw(in: drawRect, withAttributes: attributes)
+
+            if charRangeForLine.location + charRangeForLine.length < content.length {
+                lineNumber += 1
+            }
         }
     }
 }
 
-private struct EditorTextView: NSViewRepresentable {
+struct EditorTextView: NSViewRepresentable {
     @Binding var text: String
-    var isSearchBarVisible: Bool
-    var searchQuery: String
-    var replaceQuery: String
-    var currentMatchIndex: Int
-    var replaceCurrentTrigger: Int
-    var replaceAllTrigger: Int
-    var onMatchesCountChange: (Int) -> Void
+    @Binding var searchQuery: String
+    @Binding var currentMatchIndex: Int
+    @Binding var matchesCount: Int
+    let isSearchBarVisible: Bool
+    let replaceCurrentTrigger: Int
+    let replaceAllTrigger: Int
+    let replaceQuery: String
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
+        Coordinator(self)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = NSTextView()
-        textView.delegate = context.coordinator
         textView.isRichText = false
-        textView.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.delegate = context.coordinator
+        textView.string = text
         textView.allowsUndo = true
-        textView.isEditable = true
-        textView.isSelectable = true
-        textView.drawsBackground = true
-        textView.textColor = NSColor.labelColor
-
-        textView.autoresizingMask = [.width]
-        textView.minSize = NSSize(width: 0, height: 0)
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
 
         let scrollView = NSScrollView()
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.hasVerticalRuler = true
-        scrollView.rulersVisible = true
 
         let rulerView = LineNumberRulerView(textView: textView)
         scrollView.verticalRulerView = rulerView
+        scrollView.hasVerticalRuler = true
+        scrollView.rulersVisible = true
 
         scrollView.contentView.postsBoundsChangedNotifications = true
-        context.coordinator.boundsObserver = NotificationCenter.default.addObserver(
+        let observer = NotificationCenter.default.addObserver(
             forName: NSView.boundsDidChangeNotification,
             object: scrollView.contentView,
             queue: .main
         ) { [weak rulerView] _ in
             rulerView?.needsDisplay = true
         }
+        context.coordinator.boundsObserver = observer
 
-        textView.string = text
         context.coordinator.textView = textView
-        context.coordinator.rulerView = rulerView
 
         return scrollView
-    }
-
-    func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let textView = nsView.documentView as? NSTextView else { return }
-        let coordinator = context.coordinator
-
-        if textView.string != text {
-            let selectedRanges = textView.selectedRanges
-            textView.string = text
-            textView.selectedRanges = selectedRanges
-            coordinator.rulerView?.needsDisplay = true
-        }
-
-        if replaceCurrentTrigger != coordinator.lastReplaceCurrentTrigger {
-            coordinator.lastReplaceCurrentTrigger = replaceCurrentTrigger
-            let query = searchQuery
-            let replacement = replaceQuery
-            let index = currentMatchIndex
-            DispatchQueue.main.async {
-                coordinator.replaceCurrentMatch(in: textView, query: query, replacement: replacement, index: index)
-            }
-        }
-
-        if replaceAllTrigger != coordinator.lastReplaceAllTrigger {
-            coordinator.lastReplaceAllTrigger = replaceAllTrigger
-            let query = searchQuery
-            let replacement = replaceQuery
-            DispatchQueue.main.async {
-                coordinator.replaceAllMatches(in: textView, query: query, replacement: replacement)
-            }
-        }
-
-        guard isSearchBarVisible, !searchQuery.isEmpty else {
-            coordinator.clearHighlightIfNeeded(textView: textView)
-            coordinator.reportMatchesCountIfNeeded(0, onChange: onMatchesCountChange)
-            return
-        }
-
-        let ranges: [NSRange]
-        if coordinator.cachedSearchedText == textView.string && coordinator.cachedQuery == searchQuery {
-            ranges = coordinator.cachedRanges
-        } else {
-            ranges = coordinator.matches(in: textView.string, query: searchQuery)
-            coordinator.cachedSearchedText = textView.string
-            coordinator.cachedQuery = searchQuery
-            coordinator.cachedRanges = ranges
-        }
-
-        coordinator.highlightIfNeeded(textView: textView, ranges: ranges, currentMatchIndex: currentMatchIndex)
-        coordinator.reportMatchesCountIfNeeded(ranges.count, onChange: onMatchesCountChange)
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
@@ -549,37 +423,89 @@ private struct EditorTextView: NSViewRepresentable {
         }
     }
 
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? NSTextView else { return }
+
+        if textView.string != text {
+            textView.string = text
+        }
+
+        if context.coordinator.lastReplaceCurrentTrigger != replaceCurrentTrigger {
+            context.coordinator.lastReplaceCurrentTrigger = replaceCurrentTrigger
+            context.coordinator.replaceCurrentMatch(
+                textView: textView,
+                replaceQuery: replaceQuery,
+                query: searchQuery,
+                currentMatchIndex: currentMatchIndex
+            )
+        }
+
+        if context.coordinator.lastReplaceAllTrigger != replaceAllTrigger {
+            context.coordinator.lastReplaceAllTrigger = replaceAllTrigger
+            context.coordinator.replaceAllMatches(
+                textView: textView,
+                replaceQuery: replaceQuery,
+                query: searchQuery
+            )
+        }
+
+        guard isSearchBarVisible, !searchQuery.isEmpty else {
+            context.coordinator.clearHighlightIfNeeded(textView: textView)
+            context.coordinator.reportMatchesCountIfNeeded(0) { count in
+                matchesCount = count
+            }
+            return
+        }
+
+        let ranges: [NSRange]
+        if context.coordinator.cachedSearchedText == textView.string,
+           context.coordinator.cachedQuery == searchQuery {
+            ranges = context.coordinator.cachedRanges
+        } else {
+            ranges = context.coordinator.matches(in: textView.string, query: searchQuery)
+            context.coordinator.cachedSearchedText = textView.string
+            context.coordinator.cachedQuery = searchQuery
+            context.coordinator.cachedRanges = ranges
+        }
+
+        context.coordinator.highlightIfNeeded(textView: textView, ranges: ranges, currentMatchIndex: currentMatchIndex)
+        context.coordinator.reportMatchesCountIfNeeded(ranges.count) { count in
+            matchesCount = count
+        }
+    }
+
     final class Coordinator: NSObject, NSTextViewDelegate {
-        var text: Binding<String>
+        var parent: EditorTextView
         weak var textView: NSTextView?
-        weak var rulerView: LineNumberRulerView?
-        var lastReplaceCurrentTrigger: Int = 0
-        var lastReplaceAllTrigger: Int = 0
+
         var boundsObserver: NSObjectProtocol?
 
         var cachedSearchedText: String?
         var cachedQuery: String?
         var cachedRanges: [NSRange] = []
-        private var lastReportedMatchesCount: Int = -1
-        private var isHighlightCleared = true
 
-        private var lastHighlightedRanges: [NSRange] = []
-        private var lastHighlightedIndex: Int = -1
+        var lastReportedMatchesCount: Int = -1
 
-        init(text: Binding<String>) {
-            self.text = text
+        var isHighlightCleared = true
+        var lastHighlightedRanges: [NSRange] = []
+        var lastHighlightedIndex: Int = -1
+
+        var lastReplaceCurrentTrigger: Int = 0
+        var lastReplaceAllTrigger: Int = 0
+
+        init(_ parent: EditorTextView) {
+            self.parent = parent
         }
 
         deinit {
-            if let boundsObserver {
-                NotificationCenter.default.removeObserver(boundsObserver)
+            if let observer = boundsObserver {
+                NotificationCenter.default.removeObserver(observer)
             }
         }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
-            text.wrappedValue = textView.string
-            rulerView?.needsDisplay = true
+            parent.text = textView.string
         }
 
         func matches(in text: String, query: String) -> [NSRange] {
@@ -606,48 +532,51 @@ private struct EditorTextView: NSViewRepresentable {
 
             return ranges
         }
-        
+
         func highlightIfNeeded(textView: NSTextView, ranges: [NSRange], currentMatchIndex: Int) {
-            guard ranges != lastHighlightedRanges || currentMatchIndex != lastHighlightedIndex else {
+            if ranges == lastHighlightedRanges && currentMatchIndex == lastHighlightedIndex {
                 return
             }
-
             highlight(textView: textView, ranges: ranges, currentMatchIndex: currentMatchIndex)
-
             lastHighlightedRanges = ranges
             lastHighlightedIndex = currentMatchIndex
+            isHighlightCleared = ranges.isEmpty
         }
 
         private func highlight(textView: NSTextView, ranges: [NSRange], currentMatchIndex: Int) {
-            guard let layoutManager = textView.layoutManager else { return }
+            guard let textStorage = textView.textStorage else { return }
 
-            let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
-            layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
-            isHighlightCleared = false
+            textStorage.beginEditing()
+            textStorage.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: textStorage.length))
 
             for (index, range) in ranges.enumerated() {
-                let color: NSColor = index == currentMatchIndex
-                    ? NSColor.orange
-                    : NSColor.orange.withAlphaComponent(0.35)
-                layoutManager.addTemporaryAttribute(.backgroundColor, value: color, forCharacterRange: range)
+                let color: NSColor = index == currentMatchIndex ? .systemOrange : .systemYellow
+                textStorage.addAttribute(.backgroundColor, value: color, range: range)
             }
 
-            if ranges.indices.contains(currentMatchIndex) {
-                textView.scrollRangeToVisible(ranges[currentMatchIndex])
-            }
+            textStorage.endEditing()
         }
 
         func clearHighlightIfNeeded(textView: NSTextView) {
             lastHighlightedRanges = []
             lastHighlightedIndex = -1
 
-            guard !isHighlightCleared, let layoutManager = textView.layoutManager else { return }
-            let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
-            layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
+            if !isHighlightCleared, let textStorage = textView.textStorage {
+                textStorage.removeAttribute(.backgroundColor, range: NSRange(location: 0, length: textStorage.length))
+            }
             isHighlightCleared = true
+
             cachedSearchedText = nil
             cachedQuery = nil
             cachedRanges = []
+        }
+
+        func invalidateHighlightCache() {
+            cachedSearchedText = nil
+            cachedQuery = nil
+            cachedRanges = []
+            lastHighlightedRanges = []
+            lastHighlightedIndex = -1
         }
 
         func reportMatchesCountIfNeeded(_ count: Int, onChange: @escaping (Int) -> Void) {
@@ -658,95 +587,89 @@ private struct EditorTextView: NSViewRepresentable {
             }
         }
 
-        func replaceCurrentMatch(in textView: NSTextView, query: String, replacement: String, index: Int) {
+        func replaceCurrentMatch(textView: NSTextView, replaceQuery: String, query: String, currentMatchIndex: Int) {
             let ranges = matches(in: textView.string, query: query)
-            guard ranges.indices.contains(index) else { return }
+            guard currentMatchIndex >= 0, currentMatchIndex < ranges.count else { return }
 
-            performReplace(in: textView, range: ranges[index], with: replacement, actionName: "Replace")
+            performReplace(textView: textView, ranges: [ranges[currentMatchIndex]], with: replaceQuery)
+            invalidateHighlightCache()
         }
 
-        func replaceAllMatches(in textView: NSTextView, query: String, replacement: String) {
+        func replaceAllMatches(textView: NSTextView, replaceQuery: String, query: String) {
             let ranges = matches(in: textView.string, query: query)
             guard !ranges.isEmpty else { return }
 
-            textView.undoManager?.beginUndoGrouping()
-            textView.undoManager?.setActionName("Replace All")
-
-            for range in ranges.reversed() {
-                if textView.shouldChangeText(in: range, replacementString: replacement) {
-                    textView.textStorage?.replaceCharacters(in: range, with: replacement)
-                    textView.didChangeText()
-                }
-            }
-
-            textView.undoManager?.endUndoGrouping()
-            rulerView?.needsDisplay = true
+            performReplace(textView: textView, ranges: ranges, with: replaceQuery)
             invalidateHighlightCache()
         }
 
-        private func performReplace(in textView: NSTextView, range: NSRange, with replacement: String, actionName: String) {
-            textView.undoManager?.beginUndoGrouping()
-            textView.undoManager?.setActionName(actionName)
+        private func performReplace(textView: NSTextView, ranges: [NSRange], with replacement: String) {
+            guard let textStorage = textView.textStorage else { return }
 
-            if textView.shouldChangeText(in: range, replacementString: replacement) {
-                textView.textStorage?.replaceCharacters(in: range, with: replacement)
-                textView.didChangeText()
+            textStorage.beginEditing()
+            for range in ranges.sorted(by: { $0.location > $1.location }) {
+                textStorage.replaceCharacters(in: range, with: replacement)
             }
+            textStorage.endEditing()
 
-            textView.undoManager?.endUndoGrouping()
-            rulerView?.needsDisplay = true
-            invalidateHighlightCache()
-        }
-
-        private func invalidateHighlightCache() {
-            lastHighlightedRanges = []
-            lastHighlightedIndex = -1
-            cachedSearchedText = nil
-            cachedQuery = nil
-            cachedRanges = []
+            textView.didChangeText()
         }
     }
 }
 
 struct ContentView: View {
-    @EnvironmentObject private var document: EditorDocument
+    @StateObject private var document = EditorDocument()
 
     var body: some View {
         VStack(spacing: 0) {
-            EditorTextView(
-                text: $document.text,
-                isSearchBarVisible: document.isSearchBarVisible,
-                searchQuery: document.searchQuery,
-                replaceQuery: document.replaceQuery,
-                currentMatchIndex: document.currentMatchIndex,
-                replaceCurrentTrigger: document.replaceCurrentTrigger,
-                replaceAllTrigger: document.replaceAllTrigger,
-                onMatchesCountChange: { count in
-                    document.matchesCount = count
-                }
-            )
-
             if document.isSearchBarVisible {
-                Divider()
                 SearchBarView(
                     searchQuery: $document.searchQuery,
-                    currentMatchIndex: document.currentMatchIndex,
                     matchesCount: document.matchesCount,
-                    onNext: { document.goToNextMatch() },
-                    onPrevious: { document.goToPreviousMatch() },
-                    onClose: { document.isSearchBarVisible = false }
+                    currentMatchIndex: document.currentMatchIndex,
+                    onNext: {
+                        guard document.matchesCount > 0 else { return }
+                        document.currentMatchIndex = (document.currentMatchIndex + 1) % document.matchesCount
+                    },
+                    onPrevious: {
+                        guard document.matchesCount > 0 else { return }
+                        document.currentMatchIndex = (document.currentMatchIndex - 1 + document.matchesCount) % document.matchesCount
+                    },
+                    onClose: {
+                        document.isSearchBarVisible = false
+                        document.isReplaceRowVisible = false
+                        document.searchQuery = ""
+                    },
+                    onToggleReplace: {
+                        document.isReplaceRowVisible.toggle()
+                    }
                 )
 
                 if document.isReplaceRowVisible {
-                    Divider()
                     ReplaceBarView(
                         replaceQuery: $document.replaceQuery,
-                        isReplaceDisabled: document.matchesCount == 0,
-                        onReplace: { document.replaceCurrentMatch() },
-                        onReplaceAll: { document.replaceAllMatches() }
+                        onReplace: {
+                            document.replaceCurrentTrigger += 1
+                        },
+                        onReplaceAll: {
+                            document.replaceAllTrigger += 1
+                        }
                     )
                 }
+
+                Divider()
             }
+
+            EditorTextView(
+                text: $document.text,
+                searchQuery: $document.searchQuery,
+                currentMatchIndex: $document.currentMatchIndex,
+                matchesCount: $document.matchesCount,
+                isSearchBarVisible: document.isSearchBarVisible,
+                replaceCurrentTrigger: document.replaceCurrentTrigger,
+                replaceAllTrigger: document.replaceAllTrigger,
+                replaceQuery: document.replaceQuery
+            )
 
             Divider()
 
@@ -756,7 +679,25 @@ struct ContentView: View {
                 lineCount: document.lineCount
             )
         }
-        .frame(minWidth: 500, minHeight: 400)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button(action: { document.newDocument() }) {
+                    Image(systemName: "doc.badge.plus")
+                }
+                Button(action: { document.openFile() }) {
+                    Image(systemName: "folder")
+                }
+                Button(action: { document.saveFile() }) {
+                    Image(systemName: "square.and.arrow.down")
+                }
+                Button(action: {
+                    document.isSearchBarVisible.toggle()
+                }) {
+                    Image(systemName: "magnifyingglass")
+                }
+                .keyboardShortcut("f", modifiers: .command)
+            }
+        }
         .background(
             WindowAccessor(
                 document: document,
@@ -766,9 +707,4 @@ struct ContentView: View {
             )
         )
     }
-}
-
-#Preview {
-    ContentView()
-        .environmentObject(EditorDocument())
 }
