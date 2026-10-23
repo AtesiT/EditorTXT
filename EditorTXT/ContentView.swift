@@ -582,26 +582,31 @@ private struct EditorTextView: NSViewRepresentable {
             rulerView?.needsDisplay = true
         }
 
-        func matches(in content: String, query: String) -> [NSRange] {
+        func matches(in text: String, query: String) -> [NSRange] {
             guard !query.isEmpty else { return [] }
 
-            let nsContent = content as NSString
             var ranges: [NSRange] = []
-            var searchRange = NSRange(location: 0, length: nsContent.length)
+            let nsText = text as NSString
+            var searchRange = NSRange(location: 0, length: nsText.length)
 
-            while searchRange.location < nsContent.length {
-                let foundRange = nsContent.range(of: query, options: .caseInsensitive, range: searchRange)
+            while true {
+                let foundRange = nsText.range(
+                    of: query,
+                    options: [.caseInsensitive, .diacriticInsensitive],
+                    range: searchRange
+                )
                 if foundRange.location == NSNotFound { break }
 
                 ranges.append(foundRange)
 
                 let nextLocation = foundRange.location + foundRange.length
-                searchRange = NSRange(location: nextLocation, length: nsContent.length - nextLocation)
+                guard nextLocation < nsText.length else { break }
+                searchRange = NSRange(location: nextLocation, length: nsText.length - nextLocation)
             }
 
             return ranges
         }
-
+        
         func highlightIfNeeded(textView: NSTextView, ranges: [NSRange], currentMatchIndex: Int) {
             guard ranges != lastHighlightedRanges || currentMatchIndex != lastHighlightedIndex else {
                 return
