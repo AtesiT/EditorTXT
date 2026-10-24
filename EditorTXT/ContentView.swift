@@ -128,7 +128,12 @@ final class EditorDocument: ObservableObject {
     func saveFileAs() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = displayName
+
+        var defaultName = displayName
+        if (defaultName as NSString).pathExtension.isEmpty {
+            defaultName += ".txt"
+        }
+        panel.nameFieldStringValue = defaultName
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
@@ -270,19 +275,23 @@ struct SearchBarView: View {
             }
             .keyboardShortcut(.return, modifiers: [.shift])
             .disabled(matchesCount == 0)
+            .accessibilityLabel("Предыдущее совпадение")
 
             Button(action: onNext) {
                 Image(systemName: "chevron.down")
             }
             .disabled(matchesCount == 0)
+            .accessibilityLabel("Следующее совпадение")
 
             Button(action: onToggleReplace) {
                 Image(systemName: "arrow.triangle.2.circlepath")
             }
+            .accessibilityLabel("Показать замену")
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
             }
+            .accessibilityLabel("Закрыть поиск")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
@@ -707,18 +716,28 @@ struct ContentView: View {
                 Button(action: { document.newDocument() }) {
                     Image(systemName: "doc.badge.plus")
                 }
+                .keyboardShortcut("n", modifiers: .command)
+                .accessibilityLabel("Новый документ")
+
                 Button(action: { document.openFile() }) {
                     Image(systemName: "folder")
                 }
+                .keyboardShortcut("o", modifiers: .command)
+                .accessibilityLabel("Открыть файл")
+
                 Button(action: { document.saveFile() }) {
                     Image(systemName: "square.and.arrow.down")
                 }
+                .keyboardShortcut("s", modifiers: .command)
+                .accessibilityLabel("Сохранить файл")
+
                 Button(action: {
                     document.isSearchBarVisible.toggle()
                 }) {
                     Image(systemName: "magnifyingglass")
                 }
                 .keyboardShortcut("f", modifiers: .command)
+                .accessibilityLabel("Поиск")
             }
         }
         .background(
