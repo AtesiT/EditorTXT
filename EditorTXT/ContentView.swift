@@ -14,7 +14,11 @@ final class EditorDocument: ObservableObject {
     @Published var fileURL: URL?
     @Published var isEdited: Bool = false
 
-    @Published var searchQuery: String = ""
+    @Published var searchQuery: String = "" {
+        didSet {
+            currentMatchIndex = 0
+        }
+    }
     @Published var replaceQuery: String = ""
     @Published var isSearchBarVisible: Bool = false
     @Published var isReplaceRowVisible: Bool = false
@@ -58,6 +62,8 @@ final class EditorDocument: ObservableObject {
     }
 
     func newDocument() {
+        guard confirmDiscardChanges() else { return }
+
         isSearchBarVisible = false
         isReplaceRowVisible = false
         searchQuery = ""
@@ -69,6 +75,8 @@ final class EditorDocument: ObservableObject {
     }
 
     func openFile() {
+        guard confirmDiscardChanges() else { return }
+
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.text, .plainText]
         panel.allowsMultipleSelection = false
@@ -468,7 +476,16 @@ struct EditorTextView: NSViewRepresentable {
             context.coordinator.cachedRanges = ranges
         }
 
-        context.coordinator.highlightIfNeeded(textView: textView, ranges: ranges, currentMatchIndex: currentMatchIndex)
+        if !ranges.isEmpty, currentMatchIndex >= ranges.count {
+            let clampedIndex = ranges.count - 1
+            DispatchQueue.main.async {
+                currentMatchIndex = clampedIndex
+            }
+        }
+
+        let effectiveIndex = ranges.isEmpty ? 0 : min(currentMatchIndex, ranges.count - 1)
+
+        context.coordinator.highlightIfNeeded(textView: textView, ranges: ranges, currentMatchIndex: effectiveIndex)
         context.coordinator.reportMatchesCountIfNeeded(ranges.count) { count in
             matchesCount = count
         }
@@ -591,7 +608,7 @@ struct EditorTextView: NSViewRepresentable {
             let ranges = matches(in: textView.string, query: query)
             guard currentMatchIndex >= 0, currentMatchIndex < ranges.count else { return }
 
-            performReplace(textView: textView, ranges: [ranges[currentMatchIndex]], with: replaceQuery)
+            performReplace(textView: textView, ranges: [ranges[currentMatchIndex]], with: replaceQuery, actionName: "Заменить")
             invalidateHighlightCache()
         }
 
@@ -599,18 +616,24 @@ struct EditorTextView: NSViewRepresentable {
             let ranges = matches(in: textView.string, query: query)
             guard !ranges.isEmpty else { return }
 
-            performReplace(textView: textView, ranges: ranges, with: replaceQuery)
+            performReplace(textView: textView, ranges: ranges, with: replaceQuery, actionName: "Заменить всё")
             invalidateHighlightCache()
         }
 
-        private func performReplace(textView: NSTextView, ranges: [NSRange], with replacement: String) {
+        private func performReplace(textView: NSTextView, ranges: [NSRange], with replacement: String, actionName: String) {
             guard let textStorage = textView.textStorage else { return }
+
+            let undoManager = textView.undoManager
+            undoManager?.beginUndoGrouping()
+            undoManager?.setActionName(actionName)
 
             textStorage.beginEditing()
             for range in ranges.sorted(by: { $0.location > $1.location }) {
                 textStorage.replaceCharacters(in: range, with: replacement)
             }
             textStorage.endEditing()
+
+            undoManager?.endUndoGrouping()
 
             textView.didChangeText()
         }
