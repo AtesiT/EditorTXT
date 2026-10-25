@@ -31,6 +31,8 @@ final class EditorDocument: ObservableObject {
     @Published private(set) var wordCount: Int = 0
     @Published private(set) var lineCount: Int = 1
 
+    weak var window: NSWindow?
+
     var displayName: String {
         fileURL?.lastPathComponent ?? "Untitled"
     }
@@ -62,41 +64,53 @@ final class EditorDocument: ObservableObject {
     }
 
     func newDocument() {
-        guard confirmDiscardChanges() else { return }
+        confirmDiscardChanges { [weak self] canProceed in
+            guard let self = self, canProceed else { return }
 
-        isSearchBarVisible = false
-        isReplaceRowVisible = false
-        searchQuery = ""
-        replaceQuery = ""
+            self.isSearchBarVisible = false
+            self.isReplaceRowVisible = false
+            self.searchQuery = ""
+            self.replaceQuery = ""
 
-        text = ""
-        fileURL = nil
-        isEdited = false
+            self.text = ""
+            self.fileURL = nil
+            self.isEdited = false
+        }
     }
 
     func openFile() {
-        guard confirmDiscardChanges() else { return }
+        confirmDiscardChanges { [weak self] canProceed in
+            guard let self = self, canProceed else { return }
 
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.text, .plainText]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.text, .plainText]
+            panel.allowsMultipleSelection = false
+            panel.canChooseDirectories = false
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+            let handleResult: (NSApplication.ModalResponse) -> Void = { response in
+                guard response == .OK, let url = panel.url else { return }
 
-        guard let content = readTextContent(from: url) else {
-            showError("Не удалось открыть файл: неизвестная или неподдерживаемая кодировка.")
-            return
+                guard let content = self.readTextContent(from: url) else {
+                    self.showError("Не удалось открыть файл: неизвестная или неподдерживаемая кодировка.")
+                    return
+                }
+
+                self.isSearchBarVisible = false
+                self.isReplaceRowVisible = false
+                self.searchQuery = ""
+                self.replaceQuery = ""
+
+                self.text = content
+                self.fileURL = url
+                self.isEdited = false
+            }
+
+            if let window = self.window {
+                panel.beginSheetModal(for: window, completionHandler: handleResult)
+            } else {
+                handleResult(panel.runModal())
+            }
         }
-
-        isSearchBarVisible = false
-        isReplaceRowVisible = false
-        searchQuery = ""
-        replaceQuery = ""
-
-        text = content
-        fileURL = url
-        isEdited = false
     }
 
     private func readTextContent(from url: URL) -> String? {
@@ -115,17 +129,19 @@ final class EditorDocument: ObservableObject {
         return nil
     }
 
-    func saveFile() {
+    func saveFile(completion: ((Bool) -> Void)? = nil) {
         if let url = fileURL {
-            if writeToFile(url: url) {
+            let success = writeToFile(url: url)
+            if success {
                 isEdited = false
             }
+            completion?(success)
         } else {
-            saveFileAs()
+            saveFileAs(completion: completion)
         }
     }
 
-    func saveFileAs() {
+    func saveFileAs(completion: ((Bool) -> Void)? = nil) {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
 
@@ -135,11 +151,28 @@ final class EditorDocument: ObservableObject {
         }
         panel.nameFieldStringValue = defaultName
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let handleResult: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self = self else {
+                completion?(false)
+                return
+            }
+            guard response == .OK, let url = panel.url else {
+                completion?(false)
+                return
+            }
 
-        if writeToFile(url: url) {
-            self.fileURL = url
-            isEdited = false
+            let success = self.writeToFile(url: url)
+            if success {
+                self.fileURL = url
+                self.isEdited = false
+            }
+            completion?(success)
+        }
+
+        if let window = window {
+            panel.beginSheetModal(for: window, completionHandler: handleResult)
+        } else {
+            handleResult(panel.runModal())
         }
     }
 
@@ -154,8 +187,11 @@ final class EditorDocument: ObservableObject {
         }
     }
 
-    func confirmDiscardChanges() -> Bool {
-        guard isEdited else { return true }
+    func confirmDiscardChanges(completion: @escaping (Bool) -> Void) {
+        guard isEdited else {
+            completion(true)
+            return
+        }
 
         let alert = NSAlert()
         alert.messageText = "Сохранить изменения перед закрытием?"
@@ -164,15 +200,27 @@ final class EditorDocument: ObservableObject {
         alert.addButton(withTitle: "Не сохранять")
         alert.addButton(withTitle: "Отмена")
 
-        let response = alert.runModal()
-        switch response {
-        case .alertFirstButtonReturn:
-            saveFile()
-            return !isEdited
-        case .alertSecondButtonReturn:
-            return true
-        default:
-            return false
+        let handleResponse: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self = self else {
+                completion(false)
+                return
+            }
+            switch response {
+            case .alertFirstButtonReturn:
+                self.saveFile { success in
+                    completion(success && !self.isEdited)
+                }
+            case .alertSecondButtonReturn:
+                completion(true)
+            default:
+                completion(false)
+            }
+        }
+
+        if let window = window {
+            alert.beginSheetModal(for: window, completionHandler: handleResponse)
+        } else {
+            handleResponse(alert.runModal())
         }
     }
 
@@ -181,15 +229,37 @@ final class EditorDocument: ObservableObject {
         alert.messageText = "Ошибка"
         alert.informativeText = message
         alert.alertStyle = .warning
-        alert.runModal()
+
+        if let window = window {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
+        }
     }
 }
 
 final class WindowAccessorCoordinator: NSObject, NSWindowDelegate {
     var document: EditorDocument?
+    private var allowClose = false
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        document?.confirmDiscardChanges() ?? true
+        if allowClose {
+            return true
+        }
+
+        guard let document = document else { return true }
+
+        if !document.isEdited {
+            return true
+        }
+
+        document.confirmDiscardChanges { [weak self] canClose in
+            guard let self = self, canClose else { return }
+            self.allowClose = true
+            sender.close()
+        }
+
+        return false
     }
 }
 
@@ -219,6 +289,7 @@ struct WindowAccessor: NSViewRepresentable {
         guard let window = view.window else { return }
 
         context.coordinator.document = document
+        document.window = window
         window.delegate = context.coordinator
 
         window.title = title
